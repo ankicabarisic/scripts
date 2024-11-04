@@ -20,7 +20,7 @@ exec 3>&1 4>&2
 trap 'exec 2>&4 1>&3' 0 1 2 3
 exec 1>$LOGFILE 2>&1
 
-# A function to print a message to the stdout as well as the LOGFILE
+# A function to print a message to stdout as well as the LOGFILE
 log_print(){
   level=$1
   Message=$2
@@ -69,8 +69,7 @@ sudo docker -v || { log_print ERROR "Docker installation failed!"; exit $EXITCOD
 
 # Refresh Kubernetes GPG Key
 log_print INFO "Refreshing Kubernetes GPG key"
-sudo apt-key del 234654DA9A296436 2>/dev/null || log_print WARNING "Old key not found or already removed"
-curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/kubernetes-archive-keyring.gpg || { log_print ERROR "Failed to add new Kubernetes GPG key"; exit $EXITCODE; }
+curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/kubernetes-archive-keyring.gpg || { log_print ERROR "Failed to add Kubernetes GPG key"; exit $EXITCODE; }
 
 # Update Kubernetes repository configuration
 log_print INFO "Updating Kubernetes repository configuration"
@@ -85,11 +84,9 @@ sudo apt-get update
 # Check for lock
 Check_lock
 
-# Install Kubernetes
-log_print INFO "Installing Kubernetes"
-sudo apt-get install -y kubeadm=1.26.15-1.1 --allow-downgrades || { log_print ERROR "kubeadm installation failed!"; exit $EXITCODE; }
-sudo apt-get install -y kubelet=1.26.15-1.1 --allow-downgrades || { log_print ERROR "kubelet installation failed!"; exit $EXITCODE; }
-sudo apt-get install -y kubectl=1.26.15-1.1 --allow-downgrades || { log_print ERROR "kubectl installation failed!"; exit $EXITCODE; }
+# Install specific version of Kubernetes
+log_print INFO "Installing Kubernetes version 1.26.15"
+sudo apt-get install -y kubeadm=1.26.15-00 kubelet=1.26.15-00 kubectl=1.26.15-00 --allow-downgrades || { log_print ERROR "Kubernetes installation failed!"; exit $EXITCODE; }
 
 # Hold Kubernetes versions to prevent auto-updates
 sudo apt-mark hold kubeadm kubelet kubectl
