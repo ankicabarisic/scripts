@@ -2,7 +2,7 @@
 
 # This bash script is designed to prepare and install docker and Kubernetes for Ubuntu 22.04.
 # If an error occurs, the script will exit with the value of the PID to point at the logfile.
-# Author: Ali Jawad FAHS, Ankica Barisic, Activeeon
+# Author: Ali Jawad FAHS, Activeeon
 
 # Set up the script variables
 STARTTIME=$(date +%s)
@@ -26,7 +26,7 @@ log_print(){
   Message=$2
   echo "$level [$(date)]: $Message"
   echo "$level [$(date)]: $Message" >&3
-  }
+}
 
 # A function to check for the apt lock
 Check_lock() {
@@ -63,23 +63,23 @@ sudo apt-get install -y curl || { log_print ERROR "curl installation failed!"; e
 log_print INFO "Installing Docker"
 sudo apt-get install -y docker.io
 sudo systemctl enable docker
-sudo systemctl status docker
 sudo systemctl start docker
 
 sudo docker -v || { log_print ERROR "Docker installation failed!"; exit $EXITCODE; }
 
-# Add the Kubernetes GPG key
-log_print INFO "Adding Kubernetes GPG key"
+# Refresh Kubernetes GPG Key
+log_print INFO "Refreshing Kubernetes GPG key"
+sudo apt-key del 234654DA9A296436 2>/dev/null || log_print WARNING "Old key not found or already removed"
 curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/kubernetes-archive-keyring.gpg || { log_print ERROR "Failed to add new Kubernetes GPG key"; exit $EXITCODE; }
 
-# Adding Kubernetes Repo
-log_print INFO "Adding Kubernetes Repo"
-sudo mkdir -p /etc/apt/keyrings
-echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.26/deb/ /" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+# Update Kubernetes repository configuration
+log_print INFO "Updating Kubernetes repository configuration"
+echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernetes.list
 
 # Check for lock
 Check_lock
-curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.26/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg || { log_print ERROR "Kubernetes repo can't be added!"; exit $EXITCODE; }
+
+# Update package list after repository update
 sudo apt-get update
 
 # Check for lock
@@ -88,43 +88,34 @@ Check_lock
 # Install Kubernetes
 log_print INFO "Installing Kubernetes"
 sudo apt-get install -y kubeadm=1.26.15-1.1 --allow-downgrades || { log_print ERROR "kubeadm installation failed!"; exit $EXITCODE; }
-sudo apt-get install -y kubelet=1.26.15-1.1 --allow-downgrades || { log_print ERROR "kubectl installation failed!"; exit $EXITCODE; }
-sudo apt-get install -y kubectl=1.26.15-1.1 --allow-downgrades || { log_print ERROR "kubelet installation failed!"; exit $EXITCODE; }
+sudo apt-get install -y kubelet=1.26.15-1.1 --allow-downgrades || { log_print ERROR "kubelet installation failed!"; exit $EXITCODE; }
+sudo apt-get install -y kubectl=1.26.15-1.1 --allow-downgrades || { log_print ERROR "kubectl installation failed!"; exit $EXITCODE; }
 
-
-# Hoding upgrades for Kubernetes software (versions to updated manually)
+# Hold Kubernetes versions to prevent auto-updates
 sudo apt-mark hold kubeadm kubelet kubectl
 
-# Checking for the installiation versions
-
-sudo mkdir /etc/containerd
+# Configure containerd
+log_print INFO "Configuring containerd"
+sudo mkdir -p /etc/containerd
 containerd config default | sudo tee /etc/containerd/config.toml
-
 sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
 sudo systemctl restart containerd
 
-
+# Check Kubernetes versions
 log_print INFO "Checking Kubernetes versions"
+kubeadm version || { log_print ERROR "kubeadm check failed!"; exit $EXITCODE; }
+kubectl version || { log_print ERROR "kubectl check failed!"; exit $EXITCODE; }
+kubelet --version || { log_print ERROR "kubelet check failed!"; exit $EXITCODE; }
 
-kubeadm version     || { log_print ERROR "kubeadm installation failed!"; exit $EXITCODE; }
-kubectl version
-if [ $? -gt 1 ]
-then
-    log_print ERROR "kubectl installation failed!"; exit $EXITCODE;
+# Disable swap memory if not already disabled
+if [ "$(grep Swap /proc/meminfo | grep SwapTotal: | awk '{print $2}')" -ne "0" ]; then
+    log_print INFO "Disabling swap memory"
+    sudo swapoff -a || { log_print ERROR "Failed to turn off swap memory"; exit $EXITCODE; }
+else
+    log_print INFO "Swap memory is already off"
 fi
-kubelet --version   || { log_print ERROR "kubelet installation failed!"; exit $EXITCODE; }
 
-
-# Turn off the swap momery
-if [ `grep Swap /proc/meminfo | grep SwapTotal: | cut -d" " -f14` == "0" ];
-    then
-        log_print INFO "The swap memory is Off"
-    else
-        sudo swapoff –a || { log_print ERROR "swap memory can't be turned off "; exit $EXITCODE; }
-    fi
-
-
-# Declare configuration done successfully
+# Declare configuration completed successfully
 ENDTIME=$(date +%s)
 ELAPSED=$(( ENDTIME - STARTTIME ))
-log_print INFO "Configuration done successfully in $ELAPSED seconds "
+log_print INFO "Configuration done successfully in $ELAPSED seconds"
