@@ -79,13 +79,23 @@ echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https:/
 Check_lock
 
 # Update package list after repository update
-sudo apt-get update
+log_print INFO "Updating package list after adding Kubernetes repository."
+sudo apt-get update || { log_print ERROR "Failed to update package list after adding Kubernetes repo."; exit $EXITCODE; }
 
 # Check for lock
 Check_lock
 
+# Verify if the specific Kubernetes version is available
+log_print INFO "Checking available Kubernetes versions"
+available_k8s_version=$(apt-cache madison kubeadm | grep "1.26.15-00" | head -1 | awk '{print $3}')
+if [[ -z "$available_k8s_version" ]]; then
+    log_print ERROR "Kubernetes version 1.26.15-00 is not available in the repository."
+    apt-cache madison kubeadm  # Log available versions for troubleshooting
+    exit $EXITCODE
+fi
+
 # Install specific version of Kubernetes
-log_print INFO "Installing Kubernetes version 1.26.15"
+log_print INFO "Installing Kubernetes version 1.26.15-00"
 sudo apt-get install -y kubeadm=1.26.15-00 kubelet=1.26.15-00 kubectl=1.26.15-00 --allow-downgrades || { log_print ERROR "Kubernetes installation failed!"; exit $EXITCODE; }
 
 # Hold Kubernetes versions to prevent auto-updates
