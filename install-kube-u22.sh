@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# This bash script is designed to prepare and install docker and Kubernetes for Ubuntu 22.04.
+# This bash script is designed to prepare and install docker and Kubernetes v1.26 for Ubuntu 22.04.
 # If an error occurs, the script will exit with the value of the PID to point at the logfile.
-# Author: Ali Jawad FAHS, Activeeon
+# Author: Ali Jawad FAHS, Ankica Barisic, Activeeon
 
 # Set up the script variables
 STARTTIME=$(date +%s)
@@ -20,13 +20,13 @@ exec 3>&1 4>&2
 trap 'exec 2>&4 1>&3' 0 1 2 3
 exec 1>$LOGFILE 2>&1
 
-# A function to print a message to stdout as well as the LOGFILE
+# A function to print a message to the stdout as well as the LOGFILE
 log_print(){
   level=$1
   Message=$2
   echo "$level [$(date)]: $Message"
   echo "$level [$(date)]: $Message" >&3
-}
+  }
 
 # A function to check for the apt lock
 Check_lock() {
@@ -39,6 +39,7 @@ Check_lock() {
         ((i=i+10))
     done
     log_print INFO "Exited the while loop, time spent: $i"
+    echo "ps aux | grep apt"
     ps aux | grep apt
     log_print INFO "Waiting for lock task ended properly."
 }
@@ -63,66 +64,68 @@ sudo apt-get install -y curl || { log_print ERROR "curl installation failed!"; e
 log_print INFO "Installing Docker"
 sudo apt-get install -y docker.io
 sudo systemctl enable docker
+sudo systemctl status docker
 sudo systemctl start docker
 
 sudo docker -v || { log_print ERROR "Docker installation failed!"; exit $EXITCODE; }
 
-# Refresh Kubernetes GPG Key
-log_print INFO "Refreshing Kubernetes GPG key"
-curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/kubernetes-archive-keyring.gpg || { log_print ERROR "Failed to add Kubernetes GPG key"; exit $EXITCODE; }
+# Add the Kubernetes GPG key
+log_print INFO "Adding Kubernetes GPG key"
+curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o  /etc/apt/keyrings/kubernetes-apt-keyring.gpg || { log_print ERROR "Failed to add new Kubernetes GPG key"; exit $EXITCODE; }
 
-# Update Kubernetes repository configuration
-log_print INFO "Updating Kubernetes repository configuration"
-echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+# Adding Kubernetes Repo
+log_print INFO "Adding Kubernetes Repo"
+sudo mkdir -p /etc/apt/keyrings
+echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.26/deb/ /" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+
+# Check for lock
+Check_lock
+curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.26/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg || { log_print ERROR "Kubernetes repo can't be added!"; exit $EXITCODE; }
+sudo apt-get update
 
 # Check for lock
 Check_lock
 
-# Update package list after repository update
-log_print INFO "Updating package list after adding Kubernetes repository."
-sudo apt-get update || { log_print ERROR "Failed to update package list after adding Kubernetes repo."; exit $EXITCODE; }
+# Install Kubernetes
+log_print INFO "Installing Kubernetes"
+sudo apt-get install -y kubeadm=1.26.15-1.1 --allow-downgrades || { log_print ERROR "kubeadm installation failed!"; exit $EXITCODE; }
+sudo apt-get install -y kubelet=1.26.15-1.1 --allow-downgrades || { log_print ERROR "kubectl installation failed!"; exit $EXITCODE; }
+sudo apt-get install -y kubectl=1.26.15-1.1 --allow-downgrades || { log_print ERROR "kubelet installation failed!"; exit $EXITCODE; }
 
-# Check for lock
-Check_lock
 
-# Verify if the specific Kubernetes version is available
-log_print INFO "Checking available Kubernetes versions"
-available_k8s_version=$(apt-cache madison kubeadm | grep "1.26.15-00" | head -1 | awk '{print $3}')
-if [[ -z "$available_k8s_version" ]]; then
-    log_print ERROR "Kubernetes version 1.26.15-00 is not available in the repository."
-    apt-cache madison kubeadm  # Log available versions for troubleshooting
-    exit $EXITCODE
-fi
-
-# Install specific version of Kubernetes
-log_print INFO "Installing Kubernetes version 1.26.15-00"
-sudo apt-get install -y kubeadm=1.26.15-00 kubelet=1.26.15-00 kubectl=1.26.15-00 --allow-downgrades || { log_print ERROR "Kubernetes installation failed!"; exit $EXITCODE; }
-
-# Hold Kubernetes versions to prevent auto-updates
+# Hoding upgrades for Kubernetes software (versions to updated manually)
 sudo apt-mark hold kubeadm kubelet kubectl
 
-# Configure containerd
-log_print INFO "Configuring containerd"
-sudo mkdir -p /etc/containerd
+# Checking for the installiation versions
+
+sudo mkdir /etc/containerd
 containerd config default | sudo tee /etc/containerd/config.toml
+
 sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
 sudo systemctl restart containerd
 
-# Check Kubernetes versions
+
 log_print INFO "Checking Kubernetes versions"
-kubeadm version || { log_print ERROR "kubeadm check failed!"; exit $EXITCODE; }
-kubectl version || { log_print ERROR "kubectl check failed!"; exit $EXITCODE; }
-kubelet --version || { log_print ERROR "kubelet check failed!"; exit $EXITCODE; }
 
-# Disable swap memory if not already disabled
-if [ "$(grep Swap /proc/meminfo | grep SwapTotal: | awk '{print $2}')" -ne "0" ]; then
-    log_print INFO "Disabling swap memory"
-    sudo swapoff -a || { log_print ERROR "Failed to turn off swap memory"; exit $EXITCODE; }
-else
-    log_print INFO "Swap memory is already off"
+kubeadm version     || { log_print ERROR "kubeadm installation failed!"; exit $EXITCODE; }
+kubectl version
+if [ $? -gt 1 ]
+then
+    log_print ERROR "kubectl installation failed!"; exit $EXITCODE;
 fi
+kubelet --version   || { log_print ERROR "kubelet installation failed!"; exit $EXITCODE; }
 
-# Declare configuration completed successfully
+
+# Turn off the swap momery
+if [ `grep Swap /proc/meminfo | grep SwapTotal: | cut -d" " -f14` == "0" ];
+    then
+        log_print INFO "The swap memory is Off"
+    else
+        sudo swapoff –a || { log_print ERROR "swap memory can't be turned off "; exit $EXITCODE; }
+    fi
+
+
+# Declare configuration done successfully
 ENDTIME=$(date +%s)
 ELAPSED=$(( ENDTIME - STARTTIME ))
-log_print INFO "Configuration done successfully in $ELAPSED seconds"
+log_print INFO "Configuration done successfully in $ELAPSED seconds "
